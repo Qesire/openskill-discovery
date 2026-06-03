@@ -1,9 +1,11 @@
 ---
 name: skill-discovery
 description: |
+  搜索/查找/安装/验证/安全审计 skill 和 agent，适配 Claude skill。
   Use when the user asks to search for skills/agents, find a skill for a specific task,
   install a skill, check skill quality, audit skill security, or adapt a Claude skill.
-  Triggers on: skill, agent, install, find skill, search skill, validate skill,
+  Triggers on: 搜索skill, 查找技能, 安装技能, 验证skill, 安全审计skill, 查找agent,
+  skill, agent, install, find skill, search skill, validate skill,
   security audit, audit skill, Claude Code skill, Codex skill, OpenCode skill,
   skill quality, install agent, install from GitHub, find agent skill.
   Do NOT trigger on: general GitHub operations, general package installation,
