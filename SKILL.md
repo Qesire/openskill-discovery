@@ -111,7 +111,7 @@ Two scopes — ask the user which they want:
 | OpenCode | `~/.config/opencode/skills/<name>/SKILL.md` | `.opencode/skills/<name>/SKILL.md` |
 | Claude Code | `~/.claude/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` |
 
-**Project-local requires** CWD inside a git repo (OpenCode walks up to worktree root to discover `.opencode/skills/` and `.claude/skills/`).
+**Project-local recommended** inside a git repo — OpenCode walks from CWD up to the git worktree root to discover `.opencode/skills/`, `.claude/skills/`, and `.agents/skills/`. Works without git too (walks to `/`), but discovery is less efficient.
 
 ```bash
 # Global install
@@ -151,7 +151,7 @@ Full path reference, plugin structures, and per-platform install instructions: `
 | 8 | Curated repos take priority over raw search results when scores are equal |
 | 9 | When porting a skill between platforms, warn about unsupported fields (Claude-only `allowed-tools`, `hooks`, `context: fork` are ignored by OpenCode) |
 | 10 | All cross-references between SKILL.md and reference files must use relative paths (`references/xxx.md`) |
-| 11 | Always ask the user whether to install globally (all projects) or project-locally (this repo only). For project-local, verify CWD is inside a git repo. |
+| 11 | Always ask the user whether to install globally (all projects) or project-locally (this repo only). For project-local, recommend a git repo for efficient discovery (OpenCode walks CWD→worktree root); warn if outside one but allow the install. |
 
 ---
 
@@ -170,7 +170,7 @@ User: *"find me a docker skill"*
 9. **Check for plugins**: `.opencode/INSTALL.md`, `.claude-plugin/plugin.json`
 10. **Present results**: table with name, description, repo, stars, validation, security rating, platforms
 11. **Ask scope**: "安装为全局 skill（所有项目可用）还是项目 skill（仅当前项目）？"
-    - If project-local, verify CWD is inside a git repo
+    - If project-local, recommend a git repo; warn if outside one but allow
 12. **Install**: follow Section 4 based on user's platform and scope choice
 
 ### Edge Cases (see `references/edge-cases.md`)

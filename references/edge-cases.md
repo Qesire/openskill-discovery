@@ -121,10 +121,11 @@ Report format:
    - Global: available in every project you open
    - Project-local: available only in the current repo, versionable in git
 3. If user chooses project-local:
-   - Check that CWD is inside a git repository (use `git rev-parse --show-toplevel`)
-   - If not in a git repo: warn "当前目录不在 git 仓库内。OpenCode 从 git worktree 根目录向上扫描项目 skill，如果不在仓库内可能无法被发现。是否继续？"
-   - Install to `.opencode/skills/<name>/` or `.claude/skills/<name>/`
-4. If user chooses global:
+    - Check if CWD is inside a git repository (use `git rev-parse --show-toplevel`)
+    - If in a git repo: install to `.opencode/skills/<name>/` or `.claude/skills/<name>/`
+    - If NOT in a git repo: warn "当前目录不在 git 仓库内。OpenCode 会从当前目录向上走到文件系统根来扫描项目 skill（效率较低）。建议在 git 仓库内使用。是否继续？"
+    - If user continues: install anyway (OpenCode walks to `/` as fallback)
+ 4. If user chooses global:
    - Install to `~/.config/opencode/skills/<name>/` or `~/.claude/skills/<name>/`
 5. Never default to one scope — always ask explicitly
 ```
