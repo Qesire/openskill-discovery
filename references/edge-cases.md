@@ -111,6 +111,26 @@ Report format:
 
 ---
 
+## 8. No Scope Specified for Installation
+
+**Trigger:** User says "install it" or ".install this without specifying global vs. project-local.
+
+```
+1. Ask: "安装为全局 skill（所有项目可用）还是项目 skill（仅当前项目）？"
+2. Explain the difference:
+   - Global: available in every project you open
+   - Project-local: available only in the current repo, versionable in git
+3. If user chooses project-local:
+   - Check that CWD is inside a git repository (use `git rev-parse --show-toplevel`)
+   - If not in a git repo: warn "当前目录不在 git 仓库内。OpenCode 从 git worktree 根目录向上扫描项目 skill，如果不在仓库内可能无法被发现。是否继续？"
+   - Install to `.opencode/skills/<name>/` or `.claude/skills/<name>/`
+4. If user chooses global:
+   - Install to `~/.config/opencode/skills/<name>/` or `~/.claude/skills/<name>/`
+5. Never default to one scope — always ask explicitly
+```
+
+---
+
 ## General Fallback Principle
 
 When any tool or method is unavailable:

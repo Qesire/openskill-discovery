@@ -104,17 +104,31 @@ Full explanations of all 15 checks: `references/security-scanning.md`.
 
 ### 4. Installing Skills
 
-| Platform | Skill path | Agent path |
-|----------|-----------|------------|
-| OpenCode | `~/.config/opencode/skills/<name>/SKILL.md` | `~/.config/opencode/agents/<name>.md` |
-| Claude Code | `~/.claude/skills/<name>/SKILL.md` | `~/.claude/agents/<name>.md` |
+Two scopes — ask the user which they want:
+
+| Platform | Global (all projects) | Project-local (this repo only) |
+|----------|----------------------|-------------------------------|
+| OpenCode | `~/.config/opencode/skills/<name>/SKILL.md` | `.opencode/skills/<name>/SKILL.md` |
+| Claude Code | `~/.claude/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` |
+
+**Project-local requires** CWD inside a git repo (OpenCode walks up to worktree root to discover `.opencode/skills/` and `.claude/skills/`).
 
 ```bash
-# Skill install
-mkdir -p <install_path> && cp -r <skill_directory>/* $_/
+# Global install
+mkdir -p ~/.config/opencode/skills/<name> && cp -r <skill_directory>/* $_/
+mkdir -p ~/.claude/skills/<name> && cp -r <skill_directory>/* $_/
 
-# Agent install
-cp <agent_file> <platform_agent_path>/<name>.md
+# Project-local install (run from repo root)
+mkdir -p .opencode/skills/<name> && cp -r <skill_directory>/* $_/
+mkdir -p .claude/skills/<name> && cp -r <skill_directory>/* $_/
+
+# Agent (global)
+cp <agent_file> ~/.config/opencode/agents/<name>.md
+cp <agent_file> ~/.claude/agents/<name>.md
+
+# Agent (project-local)
+cp <agent_file> .opencode/agents/<name>.md
+cp <agent_file> .claude/agents/<name>.md
 ```
 
 Also detect plugin structures: `.opencode/INSTALL.md` (OpenCode plugin), `.claude-plugin/plugin.json` (Claude plugin). Report plugin install instructions when detected.
@@ -137,6 +151,7 @@ Full path reference, plugin structures, and per-platform install instructions: `
 | 8 | Curated repos take priority over raw search results when scores are equal |
 | 9 | When porting a skill between platforms, warn about unsupported fields (Claude-only `allowed-tools`, `hooks`, `context: fork` are ignored by OpenCode) |
 | 10 | All cross-references between SKILL.md and reference files must use relative paths (`references/xxx.md`) |
+| 11 | Always ask the user whether to install globally (all projects) or project-locally (this repo only). For project-local, verify CWD is inside a git repo. |
 
 ---
 
@@ -153,8 +168,10 @@ User: *"find me a docker skill"*
 7. **Validate each**: frontmatter check (Section 2)
 8. **Security-scan each**: combined rg scan (Section 3)
 9. **Check for plugins**: `.opencode/INSTALL.md`, `.claude-plugin/plugin.json`
-10. **Present results**: table with name, description, repo, stars, validation, security rating, platforms, install methods
-11. **Install**: follow Section 4 based on user's platform choice
+10. **Present results**: table with name, description, repo, stars, validation, security rating, platforms
+11. **Ask scope**: "安装为全局 skill（所有项目可用）还是项目 skill（仅当前项目）？"
+    - If project-local, verify CWD is inside a git repo
+12. **Install**: follow Section 4 based on user's platform and scope choice
 
 ### Edge Cases (see `references/edge-cases.md`)
 
@@ -165,6 +182,7 @@ User: *"find me a docker skill"*
 - **Duplicate names**: prefer official sources, present comparison
 - **Non-SKILL.md repo**: check for commands/ format, report if incompatible
 - **MCP/built-in skill**: report as already available, do not attempt file install
+- **No scope specified**: ask "global or project-local?" before installing (see Hard Rule #11)
 
 ---
 
@@ -192,6 +210,9 @@ User: *"find me a docker skill"*
 | Check for OpenCode plugin | `gh api repos/<owner>/<repo>/contents/.opencode/INSTALL.md` |
 | Check for Claude plugin | `gh api repos/<owner>/<repo>/contents/.claude-plugin/plugin.json` |
 | Security scan | `rg -n -e '...' -e '...' ... .` (15 patterns — see Section 3) |
-| Install skill (OpenCode) | `mkdir -p ~/.config/opencode/skills/<name> && cp -r <src>/* $_/` |
-| Install skill (Claude Code) | `mkdir -p ~/.claude/skills/<name> && cp -r <src>/* $_/` |
-| Install agent (OpenCode) | `cp <src> ~/.config/opencode/agents/<name>.md` |
+| Install skill (OpenCode, global) | `mkdir -p ~/.config/opencode/skills/<name> && cp -r <src>/* $_/` |
+| Install skill (OpenCode, project) | `mkdir -p .opencode/skills/<name> && cp -r <src>/* $_/` |
+| Install skill (Claude, global) | `mkdir -p ~/.claude/skills/<name> && cp -r <src>/* $_/` |
+| Install skill (Claude, project) | `mkdir -p .claude/skills/<name> && cp -r <src>/* $_/` |
+| Install agent (OpenCode, global) | `cp <src> ~/.config/opencode/agents/<name>.md` |
+| Install agent (OpenCode, project) | `cp <src> .opencode/agents/<name>.md` |
