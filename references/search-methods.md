@@ -1,12 +1,51 @@
 # Search Methods Reference
 
-Detailed methods for finding agent skills on GitHub with auth requirements, rate limits, and fallbacks.
+Phase-ordered search workflow with auth requirements and fallbacks. Each phase exits on success; proceed to the next only if the previous fails.
 
 ---
 
-## Method A: GitHub CLI Code Search (requires auth)
+## Phase 0: Tool Availability Check
 
-**Prerequisite**: `gh auth login` with a GitHub account. Any token scope works (even a no-scope PAT).
+Before searching, determine what tools are available:
+
+| Tool | Check command | If available | If not |
+|------|--------------|--------------|--------|
+| `gh` CLI + auth | `gh auth status` | Phase 2 (code search) works | Skip Phase 2; use Phase 3 + Phase 4 |
+| `curl` | Always available via Bash | Phase 1, 3, 4 work | None (always available) |
+| `jq` | `jq --version` | Parse JSON responses cleanly | Use `python3 -m json.tool` or manual grep |
+| `rg` | `rg --version` | Security scan works fully | Security scan uses `grep -rnP` |
+
+---
+
+## Phase 1: Curated Repositories (always run first)
+
+Search known high-quality skill repositories directly. No auth needed, no rate limits, highest-quality results.
+
+| Repository | Contents | Best for |
+|---|---|---|
+| `anthropics/skills` | Official Anthropic: skill-creator, pdf, xlsx, frontend-design | Reference implementations |
+| `openai/skills` | Official Codex curated catalog (~21k stars) | Codex-specific skills |
+| `obra/superpowers` | TDD, debugging, brainstorming, code-review methodology | Development workflow skills |
+| `addyosmani/agent-skills` | SDLC skills with Google engineering practices | Software engineering |
+| `affaan-m/everything-claude-code` | 188 skills, 50 agents | Broad coverage |
+| `alirezarezvani/claude-skills` | 246 skills across engineering, marketing, C-level | Non-engineering domains |
+| `ecc/agent-skills` | 249 skills, 63 agents, multi-platform | Cross-platform reference |
+| `OthmanAdi/planning-with-files` | Persistent markdown planning | Project management |
+| `ChenLiu-1996/figures4papers` | Academic figure generation | Academic/LaTeX |
+
+**How to use:**
+
+1. Scan the table for repos matching the user's query domain
+2. Probe the matching repo's skill directory: `gh api repos/<owner>/<repo>/git/trees/HEAD?recursive=1 | jq -r '.tree[].path' | grep -i 'SKILL\.md$'`
+3. For each match, fetch the raw SKILL.md: `curl -s "https://raw.githubusercontent.com/<owner>/<repo>/HEAD/<path>"`
+4. If matches found → rank, validate, present. Exit.
+5. If no matches → proceed to Phase 2.
+
+---
+
+## Phase 2: GitHub CLI Code Search (requires auth)
+
+**Prerequisite:** `gh auth login` (any token scope works).
 
 ```bash
 gh search code "filename:SKILL.md <query>" --limit 30
@@ -18,124 +57,91 @@ Each result includes `repository.full_name` and `path`. For top hits, fetch the 
 curl -s "https://raw.githubusercontent.com/<owner>/<repo>/HEAD/<path_to_SKILL.md>"
 ```
 
-**Auth required**: Yes. Code Search API (`GET /search/code`) requires authentication.
-**Rate limit**: 9 requests/min (authenticated).
-**Pros**: Directly finds SKILL.md files. Most targeted method.
-**Cons**: Requires `gh` setup with auth.
+**Auth required:** Yes. Code Search API requires authentication.
+**Rate limit:** 9 req/min (authenticated).
+**If unavailable:** Skip to Phase 3.
 
 ---
 
-## Method B: Unauthenticated Repo Search + Tree Probing
+## Phase 3: Unauthenticated Repo Search + Tree Probing
 
-Search repositories without authentication, then probe each for skill directories.
+Works partially without authentication — repo discovery is free, tree probing requires auth.
 
-### Step 1: Search repositories
+### Step 3a: Search repositories (no auth needed)
+
 ```bash
 curl -s "https://api.github.com/search/repositories?q=<query>+skills&sort=stars&per_page=10" \
   | jq -r '.items[] | .full_name'
 ```
 
-If `gh` is authenticated, the CLI version works too:
-```bash
-gh search repos "<query>" --sort stars --limit 10
-```
+**Rate limit:** 10 req/min (unauthenticated).
 
-### Step 2: Probe each repo for skill directories
+### Step 3b: Probe each repo for skill directories (auth needed for gh api)
+
 ```bash
-# For each repo from step 1:
 gh api repos/<owner>/<repo>/git/trees/HEAD?recursive=1 \
   | jq -r '.tree[].path' \
   | grep -iE '(skills|\.opencode/skills|\.claude/skills|\.codex/skills|\.agents/skills)/[^/]*/SKILL\.md$'
 ```
 
-**Auth required**: Step 1 (curl) — No. Step 2 (gh api) — Yes.
-**Rate limit**: 10 req/min (unauthenticated) for repo search; 5000 req/hr (authenticated) for tree probing.
-**Pros**: No auth needed for initial discovery. Can find skills in repos that aren't primarily skill collections.
-**Cons**: Two-step process. Tree probing requires auth.
+**Rate limit:** 5000 req/hr (authenticated).
 
 ---
 
-## Method C: GitHub Web Search (no auth, full access)
+## Phase 4: GitHub Web Search Fallback (no auth)
 
-Use WebFetch to search GitHub's web interface:
+Use WebFetch on GitHub's web search as the last resort:
 
-1. **Code search**: `https://github.com/search?q=filename%3ASKILL.md+<query>&type=code`
-2. **Repo search**: `https://github.com/search?q=<query>+skills&type=repositories`
-
-Fetch the results page and extract repository names and paths. Works without any authentication but requires parsing HTML.
-
-```bash
-# Example: fetch code search results for "docker"
-curl -s -H "Accept: text/html" \
-  "https://github.com/search?q=filename%3ASKILL.md+docker&type=code"
+```
+https://github.com/search?q=filename%3ASKILL.md+<query>&type=code
+https://github.com/search?q=<query>+skills&type=repositories
 ```
 
-**Auth required**: No.
-**Rate limit**: GitHub's web rate limit (generous for browsing, ~10-30 req/min).
-**Pros**: No setup needed. Both code and repo search work.
-**Cons**: HTML parsing required. Less structured than API responses.
+Fetch results and extract repository names and paths from HTML. Works without authentication but requires HTML parsing.
+
+**Pros:** No setup, code and repo search both work.
+**Cons:** HTML parsing, less structured than API responses.
 
 ---
 
-## Method D: Curated Repositories
+## Phase 5: Ranking and Selection
 
-Known high-quality skill repositories to search directly:
+When multiple candidates are found across any phase, apply these ranking criteria in order:
 
-| Repository | Contents | Stars |
-|---|---|---|
-| `affaan-m/everything-claude-code` | 188 skills, 50 agents across categories | ~200+ |
-| `anthropics/skills` | Official Anthropic skill-creator, pdf, xlsx, frontend-design | ~5k+ |
-| `obra/superpowers` | TDD, debugging, brainstorming, code-review methodology | ~2k+ |
-| `addyosmani/agent-skills` | SDLC skills with Google engineering practices | ~1k+ |
-| `alirezarezvani/claude-skills` | 246 skills across engineering, marketing, C-level | ~500+ |
-| `openai/skills` | Official Codex curated skills catalog | ~21k+ |
-| `ecc/agent-skills` | 249 skills, 63 agents, multi-platform (7+ platforms) | ~500+ |
-| `OthmanAdi/planning-with-files` | Persistent markdown planning methodology | ~200+ |
-| `ChenLiu-1996/figures4papers` | Academic figure generation skills | ~100+ |
+| Priority | Factor | Weight |
+|----------|--------|--------|
+| 1 | Official/curated source | +3 (anthropics, openai, obra) |
+| 2 | Stars | +2 (>500), +1 (>100), 0 (else) |
+| 3 | Recent activity (commits < 3 months) | +1 |
+| 4 | Platform compatibility (matches user's platform) | +1 |
+| 5 | Validation score (all checks pass) | +1 |
+| 6 | Security rating (Clean/Low) | +1, (Medium) 0, (High) -3 |
+
+### Duplicate Names
+
+If multiple skills share the same `name`:
+1. Prefer official/curated sources
+2. Check platform specificity
+3. Present both with a comparison table if equally valid
+
+### Empty Results Across All Phases
+
+```
+"未找到匹配的技能。
+ 建议:
+ - 用更宽泛的关键词重试 (如 'container' 替代 'docker')
+ - 在 curated repos 中手动查找
+ - 参考 anthropics/skills 的 skill-creator 自行创建"
+```
 
 ---
 
 ## Fetching Skill Content
 
-Once you've identified a candidate skill, fetch the raw SKILL.md:
+Once candidates are selected, fetch the raw SKILL.md:
 
 ```bash
 curl -s "https://raw.githubusercontent.com/<owner>/<repo>/HEAD/<path>/SKILL.md"
 ```
 
-For skills in subdirectories, the `HEAD` ref works universally:
-```
-https://raw.githubusercontent.com/anthropics/skills/HEAD/skills/skill-creator/SKILL.md
-```
-
----
-
-## Selecting the Best Skill
-
-When multiple search results match, use these criteria to rank and select:
-
-### Ranking Factors (in priority order)
-
-1. **Source reputation**: Official repos (anthropics/skills, openai/skills) > established community repos > personal repos
-2. **Stars**: Higher stars indicate community validation
-3. **Recent activity**: Commits in last 3 months indicate active maintenance
-4. **Platform compatibility**: Check frontmatter `compatibility` field
-5. **Validation score**: Passes all checks from [Validating a SKILL.md](#) section
-6. **Security scan**: Clean or low-risk security scan results
-7. **Documentation quality**: Has clear instructions, examples, and edge case handling
-
-### Handling Duplicate Names
-
-If multiple skills share the same `name`:
-- Prefer the one from a curated/official repo
-- Check which target platform each is primarily designed for
-- If both are equally valid, present both and let the user decide
-
-### Handling Empty Results
-
-If no skills are found:
-- Try broader search terms (e.g., "container" instead of "docker")
-- Try Method B (repo search) with related keywords
-- Try Method C (web search) with different query formulations
-- Check curated repos manually for related skills
-- Suggest the user create a custom skill using Anthropic's skill-creator as a template
+The `HEAD` ref works universally across all repos.

@@ -6,123 +6,80 @@ description: |
   Triggers on: skill, agent, install, find skill, search skill, validate skill,
   security audit, audit skill, Claude Code skill, Codex skill, OpenCode skill,
   skill quality, install agent, install from GitHub, find agent skill.
+  Do NOT trigger on: general GitHub operations, general package installation,
+  code review requests that don't mention skills.
 license: MIT
-compatibility: opencode, claude-code, codex
+compatibility: opencode, claude-code
+metadata:
+  uses_github: true
+  prerequisites: "gh (optional, for code search), jq (optional, for JSON parsing), rg (optional, for security scanning)"
+  platforms: "OpenCode, Claude Code"
+  supported_search: "GitHub CLI, GitHub REST API, GitHub Web Search, Curated Repos"
+# Claude Code-only fields; silently ignored by OpenCode:
+allowed-tools: ["Read", "Bash", "Grep", "Glob", "WebFetch", "Task", "Edit", "Write"]
 ---
 
 # Skill Discovery & Management
 
-## Overview
+## Dispatch Table
 
-You are an AI coding agent. This skill teaches you how to find, validate, security-audit, and install agent skills from GitHub across OpenCode, Claude Code, and Codex.
-
-**Skills** go in:
-- OpenCode: `~/.config/opencode/skills/<name>/SKILL.md` (flat; nested `group/name` accepted but name is flat until PR #27981 adds `:` prefixing)
-- Claude Code: `~/.claude/skills/<name>/SKILL.md`
-- Codex: `~/.agents/skills/<name>/SKILL.md`
-**Agents** go in:
-- OpenCode: `~/.config/opencode/agents/<name>.md`
-- Claude Code: `~/.claude/agents/<name>.md`
-- Codex: `~/.agents/agents/<name>.md`
-
-All platforms support project-local paths (`.opencode/skills/`, `.claude/skills/`, `.agents/skills/`).
-OpenCode additionally discovers skills from `.claude/skills/` and `.agents/skills/` for cross-platform compatibility.
-
-See [platform-compatibility.md](references/platform-compatibility.md) for the full path reference, field support matrix, and plugin structures.
-
-When auditing or reviewing skills, use [skill-review-guide.md](references/skill-review-guide.md) for the systematic review methodology.
+| User intent | What to do | Load this reference |
+|-------------|------------|---------------------|
+| "find me a [topic] skill" / "搜索 [关键词] skill" | Search GitHub for matching skills | `references/search-methods.md` |
+| "validate this skill" / "检查这个 SKILL.md" | Check frontmatter against Agent Skills spec | Section 2 + `references/platform-compatibility.md` |
+| "security audit this skill" / "审计安全" | Run 15 security checks | Section 3 + `references/security-scanning.md` |
+| "install this skill" / "安装这个 skill" | Copy to correct platform path | Section 4 + `references/platform-compatibility.md` |
+| "review this skill" / "审查这个 skill" | Full systematic review | `references/skill-review-guide.md` |
+| Unexpected behavior / edge case | Handle boundary scenarios | `references/edge-cases.md` |
 
 ---
 
-## 1. Finding Skills on GitHub
+## 0. Configuration — Dependencies
 
-### Method A: GitHub CLI Code Search (requires auth)
+Read this before any action. Determine what's available and what needs fallback.
 
-```bash
-gh search code "filename:SKILL.md <query>" --limit 30
-```
+| Tool | Required? | Used for | If missing |
+|------|-----------|----------|------------|
+| `curl` | Yes | Fetching raw SKILL.md, unauthenticated repo search | Always available via Bash; no fallback needed |
+| `jq` | No | Parsing JSON API responses | Use `python3 -m json.tool` or manual grep |
+| `gh` CLI | No | Authenticated code search, repo probing | Fall back to Method B curl (repo search) or Method C (web search) |
+| `rg` (ripgrep) | No | Security scanning with lookahead patterns | Fall back to `grep -rnP`; skip lookahead checks if PCRE unavailable |
 
-Requires `gh auth login` (any token scope works). Rate limit: 9 req/min.
-
-Each result gives `repository.full_name` and `path`. For top hits, fetch the raw file:
-
-```bash
-curl -s "https://raw.githubusercontent.com/<owner>/<repo>/HEAD/<path_to_SKILL.md>"
-```
-
-### Method B: Repo Search + Tree Probing (repo search works without auth)
-
-```bash
-# Step 1: Search repositories (works unauthenticated via curl, 10 req/min)
-curl -s "https://api.github.com/search/repositories?q=<query>+skills&sort=stars&per_page=10" \
-  | jq -r '.items[] | .full_name'
-
-# Or with gh CLI (requires auth):
-gh search repos "<query>" --sort stars --limit 10
-
-# Step 2: Probe each repo for skill directories (requires auth)
-gh api repos/<owner>/<repo>/git/trees/HEAD?recursive=1 \
-  | jq -r '.tree[].path' \
-  | grep -iE '(skills|\.opencode/skills|\.claude/skills|\.codex/skills|\.agents/skills)/[^/]*/SKILL\.md$'
-```
-
-### Method C: GitHub Web Search (no auth)
-
-Use WebFetch on GitHub's web search as a fallback when CLI auth isn't available:
-
-```
-https://github.com/search?q=filename%3ASKILL.md+<query>&type=code
-```
-
-### Method D: Curated Repositories
-
-Known high-quality skill repositories:
-
-| Repository | Contents |
-|---|---|
-| `anthropics/skills` | Official Anthropic: skill-creator, pdf, xlsx, frontend-design |
-| `openai/skills` | Official Codex curated skills catalog (~21k stars) |
-| `obra/superpowers` | TDD, debugging, brainstorming, code-review methodology |
-| `addyosmani/agent-skills` | SDLC skills with Google engineering practices |
-| `affaan-m/everything-claude-code` | 188 skills, 50 agents |
-| `alirezarezvani/claude-skills` | 246 skills across engineering, marketing, C-level |
-| `ecc/agent-skills` | 249 skills, 63 agents, multi-platform |
-| `OthmanAdi/planning-with-files` | Persistent markdown planning |
-| `ChenLiu-1996/figures4papers` | Academic figure generation skills |
-
-See [search-methods.md](references/search-methods.md) for detailed instructions, rate limits, and selection criteria.
+**Sequential check:** tools → method selection (search-methods.md Phase 0) → execute → report.
 
 ---
 
-## 2. Validating a SKILL.md
+## 1–4. Workflow Summaries
+
+Each section below provides the core workflow. Detailed specifications, rate limits, and command variations are in the reference files.
+
+### 1. Finding Skills on GitHub
+
+**Priority order:**
+
+1. **Curated repos** — No auth needed. Check the curated list first (free, high-quality).
+2. **GitHub CLI code search** — Requires `gh auth login`. `gh search code "filename:SKILL.md <query>" --limit 30`.
+3. **Repo search (curl)** — No auth needed. `curl "https://api.github.com/search/repositories?q=<query>&sort=stars&per_page=10"` then probe trees.
+4. **Web search fallback** — No auth needed. Use WebFetch on `github.com/search?q=filename%3ASKILL.md+<query>&type=code`.
+
+For detailed instructions, auth requirements, rate limits, and selection criteria: `references/search-methods.md`.
+
+### 2. Validating a SKILL.md
 
 Per the [Agent Skills specification](https://agentskills.io/specification):
 
-**Required fields:**
 - [ ] YAML frontmatter delimited by `---`
-- [ ] `name`: lowercase, hyphens only, 1-64 chars, no consecutive hyphens (`--`), no leading/trailing `-`
-- [ ] `name` matches the parent directory name
-- [ ] `description`: 1-1024 chars, describes both what AND when to use
+- [ ] `name`: lowercase, hyphens only, 1-64 chars, no `--`, no leading/trailing `-`. Matches directory name.
+- [ ] `description`: 1-1024 chars, trigger-focused (not capability summary)
+- [ ] `license` (optional): short identifier or file reference
+- [ ] `compatibility` (optional): max 500 chars
+- [ ] Body < 500 lines; relative paths for references; step-by-step with examples
 
-**Optional fields:**
-- [ ] `license`: short license name or reference
-- [ ] `compatibility`: 1-500 chars, environment requirements
-- [ ] `metadata`: arbitrary key-value map
-- [ ] `allowed-tools`: pre-approved tools list (experimental; Claude Code ✓; OpenCode ✗)
+Full field support matrix and platform-specific behaviors: `references/platform-compatibility.md`.
 
-**Recommended:**
-- [ ] Body < 500 lines (token budget)
-- [ ] Relative paths for references (e.g., `references/REFERENCE.md`)
-- [ ] Step-by-step instructions with examples and edge cases
-- [ ] Description focuses on trigger conditions, not workflow summary
+### 3. Security Scanning
 
----
-
-## 3. Security Scanning
-
-Run security checks in the skill directory **before installation**.
-
-**Quick combined scan** — run this single command for all checks:
+Run **before installation**. Single combined scan:
 
 ```bash
 rg -n \
@@ -130,118 +87,56 @@ rg -n \
   -e 'wget.*https?://(?!raw\.githubusercontent\.com|github\.com|api\.github\.com)' \
   -e '\$\{?GITHUB_TOKEN\}?|\$\{?GH_TOKEN\}?' \
   -e 'OPENAI_API_KEY|ANTHROPIC_API_KEY|HUGGINGFACE_TOKEN' \
-  -e '~/.ssh' \
-  -e '\bchmod\s+[0-7]{3,4}\b' \
-  -e '\brm\s+-rf\s+/(?!tmp/|home/|var/tmp/)' \
-  -e '\beval\s+' \
-  -e '\bbase64\s+-[dD]\b' \
-  -e 'mkfifo|/dev/tcp|nc\s+-[e|l]' \
-  -e 'curl.*\| *(ba)?sh|wget.*\| *(ba)?sh' \
-  -e '\b(cat|read).*\.env\b' \
+  -e '~/.ssh' -e '\bchmod\s+[0-7]{3,4}\b' -e '\brm\s+-rf\s+/(?!tmp/|home/|var/tmp/)' \
+  -e '\beval\s+' -e '\bbase64\s+-[dD]\b' -e 'mkfifo|/dev/tcp|nc\s+-[e|l]' \
+  -e 'curl.*\| *(ba)?sh|wget.*\| *(ba)?sh' -e '\b(cat|read).*\.env\b' \
   -e '\b(npm install -g|pip3? install|apt-get install|brew install)\b' \
-  -e 'authorized_keys' \
-  -e '\b(env|printenv)\b' \
-  -e 'git clone.*&&' \
+  -e 'authorized_keys' -e '\b(env|printenv)\b' -e 'git clone.*&&' \
   -e '\bcp\s+.*/(usr/bin|usr/local/bin|etc/)\b' \
   .
 ```
 
-**Checks performed** (high-severity checks in **bold**):
+Report each match as `⚠ [category] in [file]:[line] — [context]`. Rate risk: Clean / Low / Medium / High.
 
-| # | Check | What it catches |
-|---|-------|-----------------|
-| 1 | Network exfiltration (curl/wget) | Fetching from non-GitHub domains |
-| 2 | Credential references | Embedded tokens and API keys |
-| 3 | SSH key access | Reading `~/.ssh` private keys |
-| 4 | File permissions | `chmod 777` etc. |
-| 5 | Destructive operations | `rm -rf /` on system dirs |
-| 6 | Code execution | Shell `eval` |
-| 7 | Base64 obfuscation | Base64 decode of hidden payloads |
-| 8 | **Reverse shells** | `mkfifo`, `/dev/tcp`, `nc -e` |
-| 9 | **Pipe to shell** | `curl ... \| bash` supply-chain attacks |
-| 10 | Sensitive file reading | `cat .env` |
-| 11 | Unsolicited packages | `npm install -g`, `pip install` |
-| 12 | SSH persistence | Writing to `authorized_keys` |
-| 13 | Environment dumping | `env`, `printenv` |
-| 14 | Clone-and-execute | `git clone ... && ...` |
-| 15 | System directory writes | `cp` to `/usr/bin`, `/etc/` |
+If `rg` not available, fall back to `grep -rnP`; skip lookahead checks if PCRE unavailable. Report skipped checks.
 
-Report each match as `⚠ WARNING: [category] in [file]:[line]` with pattern description and the matched line.
+Full explanations of all 15 checks: `references/security-scanning.md`.
 
-After scanning, rate the risk: **Clean** (no warnings) / **Low** (1-2, none high-severity) / **Medium** (3-5, or any destructive/system) / **High** (reverse shells, base64+eval combos, pipe-to-shell).
-
-See [security-scanning.md](references/security-scanning.md) for detailed explanations of each check.
-
----
-
-## 4. Installing Skills
-
-### Per-Platform Paths
+### 4. Installing Skills
 
 | Platform | Skill path | Agent path |
 |----------|-----------|------------|
 | OpenCode | `~/.config/opencode/skills/<name>/SKILL.md` | `~/.config/opencode/agents/<name>.md` |
 | Claude Code | `~/.claude/skills/<name>/SKILL.md` | `~/.claude/agents/<name>.md` |
-| Codex | `~/.agents/skills/<name>/SKILL.md` | `~/.agents/agents/<name>.md` |
-
-### Standard install (file copy)
 
 ```bash
-# Skill
-mkdir -p ~/.config/opencode/skills/<name>   # OpenCode
-mkdir -p ~/.claude/skills/<name>             # Claude Code
-mkdir -p ~/.agents/skills/<name>             # Codex
-cp -r <skill_directory>/* <target_path>/
+# Skill install
+mkdir -p <install_path> && cp -r <skill_directory>/* $_/
 
-# Agent
-mkdir -p ~/.config/opencode/agents           # OpenCode
-mkdir -p ~/.claude/agents                    # Claude Code
-mkdir -p ~/.agents/agents                    # Codex
-cp <agent_file> <target_path>/<name>.md
+# Agent install
+cp <agent_file> <platform_agent_path>/<name>.md
 ```
 
-### OpenCode Plugin install
+Also detect plugin structures: `.opencode/INSTALL.md` (OpenCode plugin), `.claude-plugin/plugin.json` (Claude plugin). Report plugin install instructions when detected.
 
-If the repo contains `.opencode/INSTALL.md` or `package.json` with `@opencode-ai/plugin` in dependencies:
-
-> This is an OpenCode plugin. Add to `~/.config/opencode/opencode.json`:
-> ```json
-> { "plugin": ["<name>@git+https://github.com/<owner>/<repo>.git"] }
-> ```
-> Then restart OpenCode.
-
-### Claude Code Plugin install
-
-If the repo contains `.claude-plugin/plugin.json`:
-
-> This is a Claude Code plugin. Install it with:
-> ```bash
-> claude /plugin install github.com/<owner>/<repo>
-> ```
-> Or copy the plugin directory to your Claude Code plugins folder.
-
-### Codex
-
-Codex invokes skills with `$skill-name`. Skills can be disabled in `~/.codex/config.toml` via `[[skills.config]]` entries.
+Full path reference, plugin structures, and per-platform install instructions: `references/platform-compatibility.md`.
 
 ---
 
-## 5. Platform Compatibility
+## 5. Hard Rules
 
-See [platform-compatibility.md](references/platform-compatibility.md) for the complete field support matrix, tool name mappings, plugin structures, and porting guidance.
-
-### Quick Field Support Summary
-
-**All platforms**: `name` (required), `description` (required), `license`, `compatibility`, `metadata`
-
-**Claude Code only**: `allowed-tools`, `disallowed-tools`, `argument-hint`, `arguments`, `disable-model-invocation`, `user-invocable`, `when_to_use`, `model`, `effort`, `context` (fork), `agent`, `hooks`, `paths`, `shell`, `maxTurns`
-
-**OpenCode only**: [skills.paths](https://opencode.ai/docs/skills/) and [skills.urls](https://opencode.ai/docs/skills/) in `opencode.json` for custom skill locations
-
-### Tool Names
-
-Read, Bash, Grep, Glob, Edit, Write, Task, TodoWrite, Skill, WebFetch — same names on all platforms.
-Claude Code additionally has `WebSearch` (no equivalent in OpenCode/Codex).
+| # | Rule |
+|---|------|
+| 1 | Never claim `gh search code` works without auth — it requires `gh auth login` |
+| 2 | Never use `.codex/skills/` paths — Codex uses `.agents/skills/`. If user mentions Codex, warn: "Codex path verification needed; check `developers.openai.com/codex/skills`" |
+| 3 | Always security-scan before installing any skill |
+| 4 | Always verify platform paths against documentation before installing — do not guess |
+| 5 | Present all candidates with validation status and security rating; never auto-install without user confirmation |
+| 6 | After installing, report what was installed and where — provide `rm -rf` uninstall command |
+| 7 | When search returns zero results, try fallback methods (broader terms, Method B, Method C, curated check) before giving up |
+| 8 | Curated repos take priority over raw search results when scores are equal |
+| 9 | When porting a skill between platforms, warn about unsupported fields (Claude-only `allowed-tools`, `hooks`, `context: fork` are ignored by OpenCode) |
+| 10 | All cross-references between SKILL.md and reference files must use relative paths (`references/xxx.md`) |
 
 ---
 
@@ -249,43 +144,54 @@ Claude Code additionally has `WebSearch` (no equivalent in OpenCode/Codex).
 
 User: *"find me a docker skill"*
 
-1. **Search**: `gh search code "filename:SKILL.md docker" --limit 30`
-2. **Rank**: Sort results by repo stars, check curated repos list first
-3. **Fetch top 5**: `curl` raw SKILL.md from each candidate
-4. **Validate each**: check frontmatter fields against spec (section 2)
-5. **Security-scan each**: run the 15 combined checks (section 3)
-6. **Check for plugins**: look for `.opencode/INSTALL.md`, `.claude-plugin/plugin.json`, etc.
-7. **Present results**: for each candidate, show:
-   - Name, description, source repo, stars
-   - Validation status (pass/fail with details)
-   - Security rating (Clean/Low/Medium/High)
-   - Supported platforms
-   - Install methods per platform
-8. **Install**: follow section 4 based on the target platform
+1. **Phase 0 — Check tools**: gh authenticated? curl available? rg available?
+2. **Phase 1 — Curated repos first**: scan known repos for "docker" matches (free, high-quality)
+3. **Phase 2 — Code search**: `gh search code "filename:SKILL.md docker" --limit 30` (if gh available)
+4. **Phase 3 — Fallback if needed**: Repo search via curl → tree probing → web search
+5. **Rank results**: Sort by repo reputation, stars, recent activity, validation score, security rating
+6. **Fetch top 5**: `curl` raw SKILL.md from each candidate
+7. **Validate each**: frontmatter check (Section 2)
+8. **Security-scan each**: combined rg scan (Section 3)
+9. **Check for plugins**: `.opencode/INSTALL.md`, `.claude-plugin/plugin.json`
+10. **Present results**: table with name, description, repo, stars, validation, security rating, platforms, install methods
+11. **Install**: follow Section 4 based on user's platform choice
 
-### Edge Cases
+### Edge Cases (see `references/edge-cases.md`)
 
-- **Empty results**: Broaden terms, try Method B/C, check curated repos manually. Suggest creating a custom skill.
-- **Duplicate names**: Prefer official sources, present both with comparison if equally valid.
-- **Rate limited**: Switch to Method C (web search) or Method B (unauthenticated repo search).
-- **No gh CLI**: Use Method B step 1 with curl (no auth) or Method C (web search).
+- **Empty results**: broaden terms, try Methods B/C, check curated repos
+- **Rate limited**: switch to web search (Method C)
+- **No gh CLI**: fall back to Method B curl (no auth) or Method C
+- **No rg**: use `grep -rnP` for security scan
+- **Duplicate names**: prefer official sources, present comparison
+- **Non-SKILL.md repo**: check for commands/ format, report if incompatible
+- **MCP/built-in skill**: report as already available, do not attempt file install
 
 ---
 
-## 7. Quick Reference
+## 7. Reference Files
+
+| Action | Load |
+|--------|------|
+| Search | `references/search-methods.md` |
+| Validate | `references/platform-compatibility.md` |
+| Security audit | `references/security-scanning.md` |
+| Review | `references/skill-review-guide.md` |
+| Edge cases | `references/edge-cases.md` |
+| Config validation | `references/platform-compatibility.md` |
+
+---
+
+## 8. Quick Reference
 
 | Task | Command |
 |---|---|
-| Search skills (auth required) | `gh search code "filename:SKILL.md <query>" --limit 30` |
-| Search repos (no auth with curl) | `curl -s "https://api.github.com/search/repositories?q=<query>&sort=stars&per_page=10"` |
-| Probe repo structure | `gh api repos/<owner>/<repo>/git/trees/HEAD?recursive=1` |
+| Search skills (auth) | `gh search code "filename:SKILL.md <query>" --limit 30` |
+| Search repos (no auth) | `curl -s "https://api.github.com/search/repositories?q=<query>&sort=stars&per_page=10" \| jq -r '.items[].full_name'` |
+| Probe repo structure | `gh api repos/<owner>/<repo>/git/trees/HEAD?recursive=1 \| jq -r '.tree[].path' \| grep -i 'SKILL\.md$'` |
 | Fetch raw SKILL.md | `curl -s "https://raw.githubusercontent.com/<owner>/<repo>/HEAD/<path>"` |
 | Check for OpenCode plugin | `gh api repos/<owner>/<repo>/contents/.opencode/INSTALL.md` |
 | Check for Claude plugin | `gh api repos/<owner>/<repo>/contents/.claude-plugin/plugin.json` |
-| Security scan (combined) | `rg -n -e '...' -e '...' ... .` (15 patterns — see section 3) |
+| Security scan | `rg -n -e '...' -e '...' ... .` (15 patterns — see Section 3) |
 | Install skill (OpenCode) | `mkdir -p ~/.config/opencode/skills/<name> && cp -r <src>/* $_/` |
 | Install skill (Claude Code) | `mkdir -p ~/.claude/skills/<name> && cp -r <src>/* $_/` |
-| Install skill (Codex) | `mkdir -p ~/.agents/skills/<name> && cp -r <src>/* $_/` |
 | Install agent (OpenCode) | `cp <src> ~/.config/opencode/agents/<name>.md` |
-| Install agent (Claude Code) | `cp <src> ~/.claude/agents/<name>.md` |
-| Install agent (Codex) | `cp <src> ~/.agents/agents/<name>.md` |
